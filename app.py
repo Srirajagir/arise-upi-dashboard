@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Page styling configurations
+# 1. Page layout and styling configurations
 st.set_page_config(
     page_title="Arise UPI Mandate Dashboard",
     page_icon="📊",
@@ -10,7 +10,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for modern card styling
+# Custom CSS styling for metric containers to look like modern app cards
 st.markdown("""
     <style>
     div[data-testid="metric-container"] {
@@ -25,48 +25,63 @@ st.markdown("""
 st.title("📊 UPI Mandate Adoption Dashboard")
 st.markdown("Analyze client registration rates and staff performance rankings across regions, divisions, and branches.")
 
-# 1. File Upload Handler
+# 2. Sidebar Interactive Control Filters & File Uploader
+st.sidebar.header("Data Source & Filters")
 uploaded_file = st.sidebar.file_uploader(
     "Upload Report (TSV or Excel format)", 
     type=["tsv", "csv", "xlsx"]
 )
 
 def clean_and_process_data(file):
-    # Determine parsing engine based on extension
+    """
+    Reads the uploaded file object dynamically. 
+    Handles both Excel (.xlsx) and tab-separated (.tsv) formats seamlessly.
+    """
     if file.name.endswith('xlsx'):
         df = pd.read_excel(file)
     else:
-        # Fallback to TSV/CSV delimiter auto-detection
+        # sep=None with engine='python' automatically detects if it's Tab or Comma separated
         df = pd.read_csv(file, sep=None, engine='python')
         
-    # Strip whitespace from column headers
+    # Strip hidden or accidental spaces from column headers
     df.columns = df.columns.str.strip()
     
-    # Standardize UPI registration column data
-    df['UPIRegister'] = df['UPIRegister'].fillna('NotRegistered').astype(str).str.strip()
+    # Standardize UPI registration column data, treating blanks as NotRegistered
+    if 'UPIRegister' in df.columns:
+        df['UPIRegister'] = df['UPIRegister'].fillna('NotRegistered').astype(str).str.strip()
+    else:
+        # Safe fallback if column name has case issues
+        possible_cols = [c for c in df.columns if c.lower() == 'upiregister']
+        if possible_cols:
+            df['UPIRegister'] = df[possible_cols[0]].fillna('NotRegistered').astype(str).str.strip()
+        else:
+            st.error("Error: Could not find 'UPIRegister' column in the uploaded file.")
+            st.stop()
     
-    # Generate direct boolean columns for clean grouping calculations
+    # Generate binary helper metrics for calculation accuracy
     df['Is_Registered'] = df['UPIRegister'].apply(lambda x: 1 if x.lower() == 'registered' else 0)
     df['Is_Not_Registered'] = df['UPIRegister'].apply(lambda x: 1 if x.lower() != 'registered' else 0)
     
     return df
 
 def generate_metrics_profile(dataframe, groupby_column):
-    # Consolidate raw tracking fields
+    """
+    Groups data by the specified level and calculates totals, percentages, and rankings.
+    """
     profile = dataframe.groupby(groupby_column).agg(
         Total_Clients=('UPIRegister', 'count'),
         Registered_Count=('Is_Registered', 'sum'),
         Pending_Count=('Is_Not_Registered', 'sum')
     ).reset_index()
     
-    # Compute relative adoption percentages
+    # Calculate Percentages
     profile['Yes %'] = (profile['Registered_Count'] / profile['Total_Clients'] * 100).round(1)
     profile['No %'] = (profile['Pending_Count'] / profile['Total_Clients'] * 100).round(1)
     
-    # Calculate performance tier ranks
+    # Assign dense ranking ranks based on performance
     profile['Rank'] = profile['Yes %'].rank(ascending=False, method='dense').astype(int)
     
-    # Categorize status tiers
+    # Performance status categorization
     def define_status(pct):
         if pct >= 30: return "🟢 On Track"
         elif pct >= 20: return "🟠 Watch"
@@ -75,17 +90,15 @@ def generate_metrics_profile(dataframe, groupby_column):
     profile['Status'] = profile['Yes %'].apply(define_status)
     return profile.sort_values(by='Rank')
 
+# 3. Main Dashboard Execution Logic
 if uploaded_file is not None:
-    # Load and prepare master dataset
+    # Process the file directly from the memory buffer stream
     raw_df = clean_and_process_data(uploaded_file)
     
-    # 2. Sidebar Interactive Control Filters
-    st.sidebar.header("Navigation Filters")
-    
+    # Sidebar Cascading Dropdowns
     regions = ["All Regions"] + sorted(list(raw_df['AriseRegion'].dropna().unique()))
     selected_region = st.sidebar.selectbox("Region Scope", regions)
     
-    # Dynamic cascading filter isolation
     if selected_region != "All Regions":
         filtered_df = raw_df[raw_df['AriseRegion'] == selected_region]
         divisions = ["All Divisions"] + sorted(list(filtered_df['RegionID'].dropna().unique()))
@@ -106,7 +119,7 @@ if uploaded_file is not None:
     if selected_branch != "All Branches":
         filtered_df = filtered_df[filtered_df['OurBranchID'] == selected_branch]
 
-    # 3. Aggregated System Summary Cards
+    # 4. KPI Top Summary Scorecards
     total_clients = len(filtered_df)
     total_registered = filtered_df['Is_Registered'].sum()
     total_pending = filtered_df['Is_Not_Registered'].sum()
@@ -122,7 +135,7 @@ if uploaded_file is not None:
     
     st.markdown("---")
     
-    # 4. Data Visualization Breakdown Tabs
+    # 5. Visualizations & Tab Layout Separations
     t1, t2, t3, t4 = st.tabs(["Region Analysis", "Division Analysis", "Branch Performance", "Staff Rankings"])
     
     with t1:
@@ -150,7 +163,7 @@ if uploaded_file is not None:
         st.subheader("Credit Officer Performance Rankings")
         staff_profile = generate_metrics_profile(filtered_df, 'CreditOfficerID')
         
-        # Individual Staff Filter Dropdown inside tab view
+        # Individual Staff Search Box
         staff_list = ["All Staff"] + sorted(list(staff_profile['CreditOfficerID'].astype(str).unique()))
         selected_staff = st.selectbox("Search / Isolate Specific Staff ID", staff_list)
         
@@ -161,4 +174,5 @@ if uploaded_file is not None:
             st.dataframe(staff_profile, use_container_width=True, hide_index=True)
 
 else:
-    st.info("💡 Please upload your TSV or Excel report file in the sidebar to populate the performance dashboards.")
+    # Friendly landing page state prompting data input
+    st.info("💡 Complete. System is live. Please upload your report file in the sidebar menu to populate the performance metrics.")
