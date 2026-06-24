@@ -20,7 +20,7 @@ st.markdown("""
         border-radius: 10px;
     }
     </style>
-""", unsafe_with_html=True)
+""", unsafe_allow_html=True)
 
 st.title("📊 UPI Mandate Adoption Dashboard")
 st.markdown("Analyze client registration rates and staff performance rankings across regions, divisions, and branches.")
